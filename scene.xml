@@ -25,16 +25,16 @@
         <light pos="0 0 3" dir="0 0 -1" directional="true" castshadow="true"/>
         
         <!-- Zemin -->
-        <geom name="floor" type="plane" size="0 0 0.05" material="grid" condim="3"/>
+        <geom name="floor" type="plane" size="0 0 0.05" material="grid" friction="1.0 0.01 0.001" condim="4"/>
 
         <!-- Masa (Table) -->
         <body name="table" pos="0.6 0.0 0.2">
-            <geom type="box" size="0.25 0.35 0.2" material="table_mat"/>
+            <geom name="table_top" type="box" size="0.25 0.35 0.2" material="table_mat" friction="1.2 0.02 0.002" condim="4"/>
         </body>
 
         <body name="cube" pos="0.55 0.0 0.42">
             <freejoint name="cube_joint"/>
-            <geom type="box" size="0.02 0.02 0.02" mass="0.1" material="cube_mat" condim="6"/>
+            <geom name="cube_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
         </body>
 
         <body name="target_marker" pos="0.6 0.0 0.45">
