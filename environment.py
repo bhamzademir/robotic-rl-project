@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -50,44 +50,125 @@ class TaskSpacePDConfig:
 class FrankaPickAndPlaceEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 50}
 
-    def __init__(self, render_mode: Optional[str] = None, scene_path: str = "scene.xml"):
+    def __init__(
+        self,
+        render_mode: Optional[str] = None,
+        scene_path: str = "scene.xml",
+        control_mode: str = "pose",
+        randomize_cube: bool = False,
+        randomize_robot_start: bool = False,
+        episode_length: int = 300,
+        action_scale: float = 0.03,
+        frame_skip: int = 5,
+    ):
+        """Create the Panda environment.
+
+        Args:
+            control_mode:
+                "pose" keeps the original classical-control interface:
+                [x, y, z, qw, qx, qy, qz].
+
+                "delta" provides the RL interface requested for PPO/SAC:
+                [dx, dy, dz, gripper] in [-1, 1]. Cartesian deltas are
+                multiplied by ``action_scale`` before being sent to IK.
+            randomize_cube:
+                Randomize the cube XY position at reset.
+            randomize_robot_start:
+                Randomize the seven arm joint positions around the nominal
+                initial posture at reset.
+        """
         super().__init__()
+        if control_mode not in {"pose", "delta"}:
+            raise ValueError("control_mode must be either 'pose' or 'delta'.")
+
         self.render_mode = render_mode
-        self.scene_path = str(Path(scene_path).resolve())
+        self.control_mode = control_mode
+        self.randomize_cube = bool(randomize_cube)
+        self.randomize_robot_start = bool(randomize_robot_start)
+        self.episode_length = int(episode_length)
+        self.action_scale = float(action_scale)
+        self.frame_skip = max(1, int(frame_skip))
+
+        scene = Path(scene_path)
+        if not scene.is_absolute():
+            scene = Path(__file__).resolve().parent / scene
+        self.scene_path = str(scene.resolve())
+
         self.model = mujoco.MjModel.from_xml_path(self.scene_path)
         self.data = mujoco.MjData(self.model)
         self.viewer = None
 
-        # Classical controller input: desired Cartesian position and quaternion.
-        self.action_space = spaces.Box(
-            low=np.array([-1.0, -1.0, 0.0, -1.0, -1.0, -1.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0, 1.5, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            dtype=np.float32,
-        )
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(30,), dtype=np.float32
-        )
-
         self.arm_joint_ids = self._find_arm_joint_ids()
         self.arm_qpos_indices = np.array(
-            [self.model.jnt_qposadr[joint_id] for joint_id in self.arm_joint_ids], dtype=int
+            [self.model.jnt_qposadr[joint_id] for joint_id in self.arm_joint_ids],
+            dtype=int,
         )
         self.arm_dof_indices = np.array(
-            [self.model.jnt_dofadr[joint_id] for joint_id in self.arm_joint_ids], dtype=int
+            [self.model.jnt_dofadr[joint_id] for joint_id in self.arm_joint_ids],
+            dtype=int,
         )
         self.end_effector_body_id = self._get_end_effector_id()
         self.cube_body_id = self._body_id("cube")
         self.target_body_id = self._body_id("target_marker")
 
-        # Gripper interface. The MuJoCo Menagerie Panda normally exposes one
-        # tendon actuator after the seven arm actuators. Detection by name is
-        # attempted first, then the final actuator is used as a safe fallback.
         self.gripper_actuator_id = self._find_gripper_actuator_id()
         self.finger_joint_ids = self._find_finger_joint_ids()
+
+        # The cube uses a MuJoCo free joint. Writing qpos, rather than xpos,
+        # makes reset randomization physically valid and persistent.
+        cube_joint_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint"
+        )
+        if cube_joint_id < 0:
+            raise RuntimeError("Expected free joint 'cube_joint' for cube randomization.")
+        self.cube_joint_id = int(cube_joint_id)
+        self.cube_qpos_adr = int(self.model.jnt_qposadr[self.cube_joint_id])
+
+        # Safe task-space and reset ranges for the tabletop scene.
+        self.workspace_low = np.array([0.35, -0.30, 0.43], dtype=float)
+        self.workspace_high = np.array([0.70, 0.30, 0.85], dtype=float)
+        self.cube_xy_low = np.array([0.46, -0.18], dtype=float)
+        self.cube_xy_high = np.array([0.64, 0.18], dtype=float)
+
+        # The nominal posture is captured from MuJoCo's reset state so the
+        # randomization stays compatible with the loaded Panda model.
+        mujoco.mj_resetData(self.model, self.data)
+        self.default_arm_qpos = self.get_joint_positions()
+        self.default_cube_position = np.array([0.55, 0.0, 0.42], dtype=float)
+
+        # Keep the original 30-D observation used by the classical-control
+        # project: q, qdot, EE position+quaternion, cube, target, cube-EE.
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(30,), dtype=np.float32
+        )
+
+        if self.control_mode == "pose":
+            # Original classical controller input.
+            self.action_space = spaces.Box(
+                low=np.array(
+                    [-1.0, -1.0, 0.0, -1.0, -1.0, -1.0, -1.0],
+                    dtype=np.float32,
+                ),
+                high=np.array(
+                    [1.0, 1.0, 1.5, 1.0, 1.0, 1.0, 1.0],
+                    dtype=np.float32,
+                ),
+                dtype=np.float32,
+            )
+        else:
+            # PPO/SAC action: normalized Cartesian delta + gripper command.
+            self.action_space = spaces.Box(
+                low=-1.0, high=1.0, shape=(4,), dtype=np.float32
+            )
+
+        self.step_count = 0
+        self.previous_action = np.zeros(self.action_space.shape, dtype=float)
 
         self._direct_torque_control_enabled = False
         self._saved_actuator_gainprm = self.model.actuator_gainprm[:7].copy()
         self._saved_actuator_biasprm = self.model.actuator_biasprm[:7].copy()
+
+        mujoco.mj_forward(self.model, self.data)
 
     def _body_id(self, name: str) -> int:
         body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
@@ -455,6 +536,71 @@ class FrankaPickAndPlaceEnv(gym.Env):
             self.render()
         return diagnostics
 
+    def _set_cube_position(self, xyz: np.ndarray) -> None:
+        """Set cube free-joint pose without writing derived xpos fields."""
+        xyz = np.asarray(xyz, dtype=float).reshape(3)
+        adr = self.cube_qpos_adr
+        self.data.qpos[adr : adr + 3] = xyz
+        # MuJoCo free-joint quaternion order is w, x, y, z.
+        self.data.qpos[adr + 3 : adr + 7] = np.array(
+            [1.0, 0.0, 0.0, 0.0], dtype=float
+        )
+
+    def _sample_robot_start(self) -> np.ndarray:
+        """Sample a reproducible, joint-limit-safe Panda starting posture."""
+        lower = self.model.jnt_range[self.arm_joint_ids, 0]
+        upper = self.model.jnt_range[self.arm_joint_ids, 1]
+        noise = self.np_random.uniform(-0.12, 0.12, size=7)
+        return np.clip(self.default_arm_qpos + noise, lower, upper)
+
+    def _sample_cube_position(self) -> np.ndarray:
+        xy = self.np_random.uniform(self.cube_xy_low, self.cube_xy_high)
+        return np.array([xy[0], xy[1], self.default_cube_position[2]], dtype=float)
+
+    def _delta_target_from_action(self, action: np.ndarray) -> np.ndarray:
+        """Convert normalized RL Cartesian deltas to a reachable world target."""
+        current_position = self.get_end_effector_pose().position
+        target = current_position + self.action_scale * action[:3]
+        return np.clip(target, self.workspace_low, self.workspace_high)
+
+    def _compute_rl_reward(
+        self, action: np.ndarray
+    ) -> tuple[float, bool, dict[str, float]]:
+        """Dense pick-and-place reward for PPO/SAC training.
+
+        The terms match the project guideline: reach, grasp-like proximity,
+        lift, place, success, and an action penalty.
+        """
+        ee_pos = self.get_end_effector_pose().position
+        cube_pos = self.get_cube_position()
+        target_pos = self.data.xpos[self.target_body_id].copy()
+
+        reach_distance = float(np.linalg.norm(ee_pos - cube_pos))
+        place_distance = float(np.linalg.norm(cube_pos - target_pos))
+        lift_height = float(max(0.0, cube_pos[2] - self.default_cube_position[2]))
+        action_penalty = float(np.dot(action, action))
+
+        grasp_like = reach_distance < 0.055
+        lifted = cube_pos[2] > self.default_cube_position[2] + 0.05
+        success = lifted and place_distance < 0.06
+
+        reward = -2.0 * reach_distance - 0.5 * place_distance
+        reward += 2.0 if grasp_like else 0.0
+        reward += 8.0 * lift_height
+        reward += 5.0 if lifted else 0.0
+        reward += 50.0 if success else 0.0
+        reward -= 0.01 * action_penalty
+
+        components = {
+            "reach_distance": reach_distance,
+            "place_distance": place_distance,
+            "lift_height": lift_height,
+            "grasp_like": float(grasp_like),
+            "lifted": float(lifted),
+            "success": float(success),
+        }
+        return float(reward), bool(success), components
+
     def _get_obs(self) -> np.ndarray:
         pose = self.get_end_effector_pose()
         quaternion = np.empty(4)
@@ -473,38 +619,145 @@ class FrankaPickAndPlaceEnv(gym.Env):
             ]
         ).astype(np.float32)
 
-    def reset(self, seed=None, options=None):
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        options: Optional[dict[str, Any]] = None,
+    ):
+        """Reset simulation and optionally randomize cube and robot start."""
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
         self.data.qfrc_applied[:] = 0.0
+        self.step_count = 0
+        self.previous_action = np.zeros(self.action_space.shape, dtype=float)
+
+        if self.randomize_robot_start:
+            robot_q = self._sample_robot_start()
+        else:
+            robot_q = self.default_arm_qpos.copy()
+        self.data.qpos[self.arm_qpos_indices] = robot_q
+        self.data.qvel[self.arm_dof_indices] = 0.0
+
+        if self.randomize_cube:
+            cube_position = self._sample_cube_position()
+        else:
+            cube_position = self.default_cube_position.copy()
+        self._set_cube_position(cube_position)
+
+        # Restoring the position actuators is important if the preceding
+        # experiment used the torque-level task-space controller.
+        self.disable_direct_torque_control()
+
         if self.gripper_actuator_id is not None:
             self.open_gripper()
+
         mujoco.mj_forward(self.model, self.data)
-        return self._get_obs(), {}
+
+        info = {
+            "cube_start_position": cube_position.copy(),
+            "robot_start_qpos": robot_q.copy(),
+            "control_mode": self.control_mode,
+        }
+        return self._get_obs(), info
 
     def step(self, action):
+        """Advance either the original pose controller or the PPO/SAC interface."""
         action = np.asarray(action, dtype=float)
-        target_position = action[:3]
-        quaternion = action[3:7]
-        quaternion /= max(np.linalg.norm(quaternion), 1e-12)
-        target_rotation_flat = np.empty(9)
-        mujoco.mju_quat2Mat(target_rotation_flat, quaternion)
-        result = self.inverse_kinematics(target_position, target_rotation_flat.reshape(3, 3))
-        self.set_joint_position_targets(result.q)
-        mujoco.mj_step(self.model, self.data)
 
-        pose = self.get_end_effector_pose()
-        reward = -float(np.linalg.norm(target_position - pose.position))
-        terminated = bool(self.data.xpos[self.cube_body_id, 2] < 0.2)
+        if self.control_mode == "pose":
+            if action.shape != (7,):
+                raise ValueError(
+                    "Pose-mode action must have shape (7,): "
+                    "[x, y, z, qw, qx, qy, qz]."
+                )
+
+            target_position = action[:3]
+            quaternion = action[3:7].copy()
+            quaternion /= max(np.linalg.norm(quaternion), 1e-12)
+
+            target_rotation_flat = np.empty(9)
+            mujoco.mju_quat2Mat(target_rotation_flat, quaternion)
+            target_rotation = target_rotation_flat.reshape(3, 3)
+
+            result = self.inverse_kinematics(target_position, target_rotation)
+            self.set_joint_position_targets(result.q)
+            mujoco.mj_step(self.model, self.data)
+
+            pose = self.get_end_effector_pose()
+            reward = -float(np.linalg.norm(target_position - pose.position))
+            cube_fallen = bool(
+                self.get_cube_position()[2] < self.default_cube_position[2] - 0.20
+            )
+            info = {
+                "ik_converged": result.converged,
+                "ik_iterations": result.iterations,
+                "position_error": result.position_error,
+                "orientation_error": result.orientation_error,
+            }
+
+            if self.render_mode == "human":
+                self.render()
+            return self._get_obs(), reward, cube_fallen, False, info
+
+        # ------------------------------------------------------------------
+        # RL mode: [dx, dy, dz, gripper] for PPO/SAC.
+        # ------------------------------------------------------------------
+        if action.shape != (4,):
+            raise ValueError(
+                "Delta-mode action must have shape (4,): "
+                "[dx, dy, dz, gripper]."
+            )
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+
+        target_position = self._delta_target_from_action(action)
+
+        # Preserve the current end-effector orientation while RL learns only
+        # the Cartesian displacement and gripper command.
+        current_rotation = self.get_end_effector_pose().rotation
+        ik_result = self.inverse_kinematics(
+            target_position=target_position,
+            target_rotation=current_rotation,
+            max_iters=120,
+            position_tol=1e-3,
+            orientation_tol=2e-3,
+        )
+        self.set_joint_position_targets(ik_result.q)
+
+        if self.gripper_actuator_id is not None:
+            # RL convention: -1 = closed, +1 = open.
+            normalized_opening = 0.5 * (float(action[3]) + 1.0)
+            self.set_gripper_opening(normalized_opening)
+
+        for _ in range(self.frame_skip):
+            mujoco.mj_step(self.model, self.data)
+
+        self.step_count += 1
+        reward, success, reward_info = self._compute_rl_reward(action)
+        cube_position = self.get_cube_position()
+        cube_fallen = bool(
+            cube_position[2] < self.default_cube_position[2] - 0.20
+        )
+        terminated = bool(success or cube_fallen)
+        truncated = bool(self.step_count >= self.episode_length)
+
+        twist = self.get_end_effector_twist()
+        self.previous_action = action.copy()
+
         info = {
-            "ik_converged": result.converged,
-            "ik_iterations": result.iterations,
-            "position_error": result.position_error,
-            "orientation_error": result.orientation_error,
+            **reward_info,
+            "target_position": target_position.copy(),
+            "ee_linear_velocity": twist[:3].copy(),
+            "ee_angular_velocity": twist[3:].copy(),
+            "ik_converged": ik_result.converged,
+            "ik_iterations": ik_result.iterations,
+            "ik_position_error": ik_result.position_error,
+            "ik_orientation_error": ik_result.orientation_error,
         }
+
         if self.render_mode == "human":
             self.render()
-        return self._get_obs(), reward, terminated, False, info
+
+        return self._get_obs(), reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode == "human":
