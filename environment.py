@@ -111,6 +111,31 @@ class FrankaPickAndPlaceEnv(gym.Env):
         self.cube_body_id = self._body_id("cube")
         self.target_body_id = self._body_id("target_marker")
 
+        # Fixed three-block setup used by the final classical-control showcase.
+        self.block_names = ("cube", "cube2", "cube3")
+        self.block_body_ids = {
+            name: self._body_id(name) for name in self.block_names
+        }
+        self.block_qpos_adrs: dict[str, int] = {}
+        self.block_dof_adrs: dict[str, int] = {}
+        for name in self.block_names:
+            joint_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{name}_joint"
+            )
+            if joint_id < 0:
+                raise RuntimeError(f"Expected free joint '{name}_joint'.")
+            self.block_qpos_adrs[name] = int(self.model.jnt_qposadr[joint_id])
+            self.block_dof_adrs[name] = int(self.model.jnt_dofadr[joint_id])
+
+        self.block_initial_positions = {
+            "cube": np.array([0.55, 0.0, 0.42], dtype=float),
+            "cube2": np.array([0.50, -0.14, 0.42], dtype=float),
+            "cube3": np.array([0.50, 0.14, 0.42], dtype=float),
+        }
+        self.stack_xy = np.array([0.65, 0.0], dtype=float)
+        self.table_top_z = 0.40
+        self.block_half_height = 0.02
+
         self.gripper_actuator_id = self._find_gripper_actuator_id()
         self.finger_joint_ids = self._find_finger_joint_ids()
 
@@ -397,6 +422,35 @@ class FrankaPickAndPlaceEnv(gym.Env):
         """Return the cube centre position in the world frame."""
         return self.data.xpos[self.cube_body_id].copy()
 
+    def get_block_position(self, name: str) -> np.ndarray:
+        """Return a named block centre using privileged simulator state."""
+        if name not in self.block_body_ids:
+            raise ValueError(f"Unknown block {name!r}; expected one of {self.block_names}.")
+        return self.data.xpos[self.block_body_ids[name]].copy()
+
+    def get_all_block_positions(self) -> dict[str, np.ndarray]:
+        """Return all block centres for planning and result validation."""
+        return {name: self.get_block_position(name) for name in self.block_names}
+
+    def set_block_position(self, name: str, position: np.ndarray) -> None:
+        """Set a block free-joint pose; intended only for reset/setup."""
+        if name not in self.block_qpos_adrs:
+            raise ValueError(f"Unknown block {name!r}; expected one of {self.block_names}.")
+        position = np.asarray(position, dtype=float).reshape(3)
+        qpos_adr = self.block_qpos_adrs[name]
+        dof_adr = self.block_dof_adrs[name]
+        self.data.qpos[qpos_adr : qpos_adr + 3] = position
+        self.data.qpos[qpos_adr + 3 : qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
+        self.data.qvel[dof_adr : dof_adr + 6] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+
+    def get_stack_target_position(self, level: int) -> np.ndarray:
+        """Return the centre of a block placed at stack level 0, 1, or 2."""
+        if level not in range(len(self.block_names)):
+            raise ValueError("Stack level must be 0, 1, or 2.")
+        centre_z = self.table_top_z + (2 * level + 1) * self.block_half_height
+        return np.array([*self.stack_xy, centre_z], dtype=float)
+
     def get_end_effector_twist(self) -> np.ndarray:
         """Return [linear_velocity, angular_velocity] in the world frame."""
         return self.geometric_jacobian() @ self.get_joint_velocities()
@@ -643,6 +697,8 @@ class FrankaPickAndPlaceEnv(gym.Env):
         else:
             cube_position = self.default_cube_position.copy()
         self._set_cube_position(cube_position)
+        for name in self.block_names[1:]:
+            self.set_block_position(name, self.block_initial_positions[name])
 
         # Restoring the position actuators is important if the preceding
         # experiment used the torque-level task-space controller.

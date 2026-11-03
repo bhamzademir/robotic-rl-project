@@ -14,6 +14,8 @@
         <!-- Küp, Masa ve Hedef materyalleri -->
         <material name="table_mat" rgba="0.4 0.25 0.15 1.0"/>
         <material name="cube_mat" rgba="0.8 0.2 0.2 1.0"/>
+        <material name="cube2_mat" rgba="0.2 0.45 0.9 1.0"/>
+        <material name="cube3_mat" rgba="0.95 0.7 0.1 1.0"/>
         <material name="target_mat" rgba="0.2 0.8 0.2 0.5"/>
     </asset>
 
@@ -37,8 +39,18 @@
             <geom name="cube_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
         </body>
 
-        <body name="target_marker" pos="0.6 0.0 0.45">
-            <geom type="sphere" size="0.02" material="target_mat" contype="0" conaffinity="0"/>
+        <body name="cube2" pos="0.50 -0.14 0.42">
+            <freejoint name="cube2_joint"/>
+            <geom name="cube2_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube2_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        </body>
+
+        <body name="cube3" pos="0.50 0.14 0.42">
+            <freejoint name="cube3_joint"/>
+            <geom name="cube3_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube3_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        </body>
+
+        <body name="target_marker" pos="0.65 0.0 0.402">
+            <geom type="cylinder" size="0.027 0.002" material="target_mat" contype="0" conaffinity="0"/>
         </body>
 
         <!-- Kamera -->
