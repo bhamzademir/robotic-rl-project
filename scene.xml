@@ -16,6 +16,8 @@
         <material name="cube_mat" rgba="0.8 0.2 0.2 1.0"/>
         <material name="cube2_mat" rgba="0.2 0.45 0.9 1.0"/>
         <material name="cube3_mat" rgba="0.95 0.7 0.1 1.0"/>
+        <material name="cube4_mat" rgba="0.55 0.25 0.8 1.0"/>
+        <material name="cube5_mat" rgba="0.15 0.75 0.45 1.0"/>
         <material name="target_mat" rgba="0.2 0.8 0.2 0.5"/>
     </asset>
 
@@ -47,6 +49,16 @@
         <body name="cube3" pos="0.50 0.14 0.42">
             <freejoint name="cube3_joint"/>
             <geom name="cube3_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube3_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        </body>
+
+        <body name="cube4" pos="0.59 -0.14 0.42">
+            <freejoint name="cube4_joint"/>
+            <geom name="cube4_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube4_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        </body>
+
+        <body name="cube5" pos="0.59 0.14 0.42">
+            <freejoint name="cube5_joint"/>
+            <geom name="cube5_geom" type="box" size="0.02 0.02 0.02" mass="0.1" material="cube5_mat" friction="1.5 0.03 0.003" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001"/>
         </body>
 
         <body name="target_marker" pos="0.65 0.0 0.402">

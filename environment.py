@@ -111,8 +111,9 @@ class FrankaPickAndPlaceEnv(gym.Env):
         self.cube_body_id = self._body_id("cube")
         self.target_body_id = self._body_id("target_marker")
 
-        # Fixed three-block setup used by the final classical-control showcase.
-        self.block_names = ("cube", "cube2", "cube3")
+        # Five labeled blocks used by the randomized two-tower experiment.
+        self.block_names = ("cube", "cube2", "cube3", "cube4", "cube5")
+        self.block_labels = dict(zip(self.block_names, ("A", "B", "C", "D", "E")))
         self.block_body_ids = {
             name: self._body_id(name) for name in self.block_names
         }
@@ -131,8 +132,14 @@ class FrankaPickAndPlaceEnv(gym.Env):
             "cube": np.array([0.55, 0.0, 0.42], dtype=float),
             "cube2": np.array([0.50, -0.14, 0.42], dtype=float),
             "cube3": np.array([0.50, 0.14, 0.42], dtype=float),
+            "cube4": np.array([0.59, -0.14, 0.42], dtype=float),
+            "cube5": np.array([0.59, 0.14, 0.42], dtype=float),
         }
         self.stack_xy = np.array([0.65, 0.0], dtype=float)
+        self.tower_positions = {
+            "tower_1": np.array([0.64, -0.04], dtype=float),
+            "tower_2": np.array([0.64, 0.12], dtype=float),
+        }
         self.table_top_z = 0.40
         self.block_half_height = 0.02
 
@@ -444,12 +451,22 @@ class FrankaPickAndPlaceEnv(gym.Env):
         self.data.qvel[dof_adr : dof_adr + 6] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
-    def get_stack_target_position(self, level: int) -> np.ndarray:
-        """Return the centre of a block placed at stack level 0, 1, or 2."""
-        if level not in range(len(self.block_names)):
-            raise ValueError("Stack level must be 0, 1, or 2.")
+    def get_stack_target_position(
+        self, level: int, tower: str | None = None
+    ) -> np.ndarray:
+        """Return a block-centre target for a tower and zero-based level."""
+        if level < 0 or level >= len(self.block_names):
+            raise ValueError(f"Invalid stack level: {level}.")
+        if tower is None:
+            xy = self.stack_xy
+        else:
+            if tower not in self.tower_positions:
+                raise ValueError(
+                    f"Unknown tower {tower!r}; expected one of {tuple(self.tower_positions)}."
+                )
+            xy = self.tower_positions[tower]
         centre_z = self.table_top_z + (2 * level + 1) * self.block_half_height
-        return np.array([*self.stack_xy, centre_z], dtype=float)
+        return np.array([*xy, centre_z], dtype=float)
 
     def get_end_effector_twist(self) -> np.ndarray:
         """Return [linear_velocity, angular_velocity] in the world frame."""

@@ -63,3 +63,27 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+## Repeated classical-control experiments
+
+Run the large-workspace trajectory study (circle, figure eight, and helix):
+
+```bash
+./venv/bin/python trajectory_experiments.py --headless --runs 5 --seed 42
+```
+
+Per-run data and mean/standard-deviation summaries are written to
+`results/trajectory_study/`.
+
+Run the randomized five-block task (one ordered three-block tower and one
+ordered two-block tower per episode):
+
+```bash
+./venv/bin/python simulation_block_stacking.py --headless --episodes 10 --seed 42
+```
+
+Episode assignments, initial block positions, completion times, placement
+errors, failure reasons, and aggregate success statistics are written to
+`results/block_stacking/`. Use `--save-step-logs` when full controller traces
+are needed. The default 120-second simulated horizon accommodates the current
+scripted five-block sequence and can be changed with `--horizon`.
