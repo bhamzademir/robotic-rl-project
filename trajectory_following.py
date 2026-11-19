@@ -113,6 +113,8 @@ def move_to_start(
     preferred_q: np.ndarray,
     config: TaskSpacePDConfig,
     timeout: float = SETTLE_TIMEOUT,
+    position_tolerance: float = SETTLE_POSITION_TOLERANCE,
+    orientation_tolerance: float = SETTLE_ORIENTATION_TOLERANCE,
 ) -> dict[str, float]:
     """Settle at the first corner before recording the experiment.
 
@@ -143,8 +145,8 @@ def move_to_start(
             time.sleep(CONTROL_DT)
 
         within_tolerance = (
-            diagnostics["position_error"] <= SETTLE_POSITION_TOLERANCE
-            and diagnostics["orientation_error"] <= SETTLE_ORIENTATION_TOLERANCE
+            diagnostics["position_error"] <= position_tolerance
+            and diagnostics["orientation_error"] <= orientation_tolerance
         )
         stable_steps = stable_steps + 1 if within_tolerance else 0
         if stable_steps >= stable_steps_required:
@@ -165,9 +167,9 @@ def move_to_start(
         "Robot did not settle at the first waypoint within "
         f"{timeout:.1f} s: position error "
         f"{diagnostics['position_error'] * 1000:.2f} mm "
-        f"(required <= {SETTLE_POSITION_TOLERANCE * 1000:.1f} mm), "
+        f"(required <= {position_tolerance * 1000:.1f} mm), "
         f"orientation error {np.degrees(diagnostics['orientation_error']):.3f} deg "
-        f"(required <= {np.degrees(SETTLE_ORIENTATION_TOLERANCE):.1f} deg)."
+        f"(required <= {np.degrees(orientation_tolerance):.1f} deg)."
     )
 
 

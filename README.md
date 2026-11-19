@@ -1,89 +1,70 @@
 # Franka Panda Classical End-Effector Control
 
-This repository contains the current implementation of the classical
-end-effector-control pipeline for a Franka Emika Panda robot in MuJoCo.
+Torque-level Cartesian control for a Franka Emika Panda in MuJoCo. The project
+validates forward and inverse kinematics, tracks three Cartesian paths, measures
+controller limits, and uses a scripted grasp-and-place sequence to build two
+ordered towers from five randomized blocks.
 
-The project culminates in a classical-control demonstration that picks three
-blocks from fixed, known positions and stacks them at one target location.
+## Setup
 
-## Current implementation
-
-- Franka Panda simulation scene in MuJoCo
-- Gymnasium-compatible environment
-- State-preserving end-effector pose interface
-- Complete 6 × 7 geometric Jacobian
-- Finite-difference Jacobian validation
-- Full 6D damped-least-squares inverse kinematics
-- Position and rotation-matrix orientation errors
-- Joint-limit enforcement
-- Damping near singular configurations
-- Non-convergence diagnostics
-- Null-space preferred-posture objective
-- Five reproducible full-pose IK validation tests
-- Stable Cartesian waypoint demonstration
-- Torque-level 6D task-space PD control
-- Quintic Cartesian spline generation and trajectory tracking
-- Scripted reach, grasp, lift, transfer, place, and release sequence
-- Fixed-position three-block stacking with privileged simulator state
-- CSV output for IK validation results
-
-## Final block-stacking demonstration
-
-On macOS, launch the MuJoCo viewer with:
+The reported experiments used Python 3.11 and MuJoCo 3.9.0. Run the commands
+from the repository root so the scripts can access the scene and model assets.
 
 ```bash
-mjpython simulation_block_stacking.py
-```
-
-For a headless run that still writes the trajectory and block-position log:
-
-```bash
-python simulation_block_stacking.py --headless
-```
-
-The final script intentionally uses fixed initial positions, a fixed stack
-location, and exact block positions from MuJoCo. Vision and reinforcement
-learning are outside this small project's scope.
-
-## Requirements
-
-- Python 3.11
-- MuJoCo 3.9.0
-- Gymnasium
-- NumPy
-- Matplotlib
-
-The Franka Panda model and its mesh assets must be available under `assets/`
-and referenced correctly by `scene.xml`.
-
-## Installation
-
-```bash
-python -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-## Repeated classical-control experiments
-
-Run the large-workspace trajectory study (circle, figure eight, and helix):
+## Reproduce the experiments
 
 ```bash
-./venv/bin/python trajectory_experiments.py --headless --runs 5 --seed 42
+python validate_kinematics.py
+python simulation_task_space_pd.py --headless --no-realtime
+python trajectory_following.py --headless --seed 19
+python trajectory_experiments.py --headless --runs 5 --seed 42
+python plot_trajectory_study_results.py
+python step_response_experiments.py --trials 5 --seed 42
+python speed_limit_experiments.py --trials 3 --seed 42
+python robustness_experiments.py --trials 5 --seed 42
+python plot_controller_limit_results.py
+python simulation_grasp_lift.py --headless --no-realtime
+python simulation_block_stacking.py --headless --episodes 10 --seed 42
+python analyze_block_stacking_results.py
 ```
 
-Per-run data and mean/standard-deviation summaries are written to
-`results/trajectory_study/`.
+The batch commands regenerate files under `results/`. Published run data:
 
-Run the randomized five-block task (one ordered three-block tower and one
-ordered two-block tower per episode):
+- [Cartesian path tracking](results/trajectory_study/summary.csv) includes
+  five trials each of an ellipse (logged as `circle`), figure-eight and helix.
+- [Controller limits](results/controller_limits/) includes position and
+  orientation steps, a traversal-time sweep, and static-load and force-pulse tests.
+- [Five-block stacking](results/block_stacking/episodes.csv) includes ten seeded
+  layouts, requested orders, completion times and placement errors. A passing
+  episode completes both towers within 120 s and meets the 35 mm horizontal
+  and 25 mm vertical placement tolerances for every block. Add
+  `--save-step-logs` to generate the full controller traces locally.
+
+## Replay one stacking episode
+
+On macOS, use the MuJoCo viewer launcher:
 
 ```bash
-./venv/bin/python simulation_block_stacking.py --headless --episodes 10 --seed 42
+mjpython simulation_block_stacking.py --episode 2 --seed 42
 ```
 
-Episode assignments, initial block positions, completion times, placement
-errors, failure reasons, and aggregate success statistics are written to
-`results/block_stacking/`. Use `--save-step-logs` when full controller traces
-are needed. The default 120-second simulated horizon accommodates the current
-scripted five-block sequence and can be changed with `--horizon`.
+For a headless replay, use `python` and add `--headless`. A single-episode run
+writes its summary and any requested step log to a seed-and-episode directory
+under `results/block_stacking/replays/`. The batch results stay available for analysis.
+
+## Report and testing
+
+- [LaTeX report source](report/latex/main.tex) and [figures](report/latex/figures/)
+- [Individual test commands and pass criteria](TESTING.md)
+
+To build a local copy of the report with a LaTeX installation:
+
+```bash
+cd report/latex
+latexmk -pdf main.tex
+```

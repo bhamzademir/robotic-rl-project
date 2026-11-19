@@ -6,3 +6,15 @@ __pycache__/
 # Generated report and document-review artifacts
 *.pdf
 /tmp/
+
+# Generated experiment traces and delivery/build directories
+/results/block_stacking/episode_*_steps.csv
+/results/block_stacking/replays/
+/.codex-build-presentation/
+/output/
+/report/latex/*.aux
+/report/latex/*.log
+/report/latex/*.out
+/report/latex/*.toc
+/report/latex/*.fls
+/report/latex/*.fdb_latexmk

@@ -97,6 +97,8 @@ class FrankaPickAndPlaceEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(self.scene_path)
         self.data = mujoco.MjData(self.model)
         self.viewer = None
+        self._viewer_path: Optional[np.ndarray] = None
+        self._viewer_target: Optional[np.ndarray] = None
 
         self.arm_joint_ids = self._find_arm_joint_ids()
         self.arm_qpos_indices = np.array(
@@ -836,7 +838,52 @@ class FrankaPickAndPlaceEnv(gym.Env):
         if self.render_mode == "human":
             if self.viewer is None:
                 self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            scene = self.viewer.user_scn
+            scene.ngeom = 0
+            if self._viewer_path is not None and len(self._viewer_path) > 1:
+                capacity = len(scene.geoms)
+                sample_count = min(len(self._viewer_path), max(2, capacity - 1))
+                indices = np.linspace(
+                    0, len(self._viewer_path) - 1, sample_count, dtype=int
+                )
+                sampled = self._viewer_path[indices]
+                for start, end in zip(sampled[:-1], sampled[1:]):
+                    geom = scene.geoms[scene.ngeom]
+                    mujoco.mjv_initGeom(
+                        geom,
+                        mujoco.mjtGeom.mjGEOM_LINE,
+                        np.zeros(3),
+                        np.zeros(3),
+                        np.eye(3).reshape(-1),
+                        np.array([0.12, 0.55, 1.0, 0.85], dtype=np.float32),
+                    )
+                    mujoco.mjv_connector(
+                        geom, mujoco.mjtGeom.mjGEOM_LINE, 4.0, start, end
+                    )
+                    scene.ngeom += 1
+            if self._viewer_target is not None and scene.ngeom < len(scene.geoms):
+                mujoco.mjv_initGeom(
+                    scene.geoms[scene.ngeom],
+                    mujoco.mjtGeom.mjGEOM_SPHERE,
+                    np.array([0.012, 0.012, 0.012]),
+                    self._viewer_target,
+                    np.eye(3).reshape(-1),
+                    np.array([1.0, 0.25, 0.05, 0.95], dtype=np.float32),
+                )
+                scene.ngeom += 1
             self.viewer.sync()
+
+    def set_viewer_path(self, positions: Optional[np.ndarray]) -> None:
+        """Set a Cartesian reference path drawn in the passive viewer."""
+        self._viewer_path = (
+            None if positions is None else np.asarray(positions, dtype=float).reshape(-1, 3)
+        )
+
+    def set_viewer_target(self, position: Optional[np.ndarray]) -> None:
+        """Set the current desired-position marker drawn in the viewer."""
+        self._viewer_target = (
+            None if position is None else np.asarray(position, dtype=float).reshape(3)
+        )
 
     def close(self):
         if self.viewer is not None:

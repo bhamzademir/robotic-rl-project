@@ -1,0 +1,18 @@
+{
+  "episodes": 10,
+  "placements": 50,
+  "successes": 10,
+  "success_rate": 1.0,
+  "success_effect_of_initial_position_estimable": false,
+  "reason_success_effect_not_estimable": "All 10 episodes succeeded; there is no failure variation.",
+  "correlations": {
+    "raw_initial_x_m_pearson_r": -0.004777701262456858,
+    "level_adjusted_initial_x_m_pearson_r": -0.23333005019229655,
+    "raw_initial_abs_y_m_pearson_r": -0.042232443833226836,
+    "level_adjusted_initial_abs_y_m_pearson_r": 0.1464531574181794,
+    "raw_pickup_distance_m_pearson_r": -0.04725141331920553,
+    "level_adjusted_pickup_distance_m_pearson_r": 0.05028284452831838,
+    "raw_pick_sequence_pearson_r": 0.4301776022987875,
+    "level_adjusted_pick_sequence_pearson_r": -0.0938801561102025
+  }
+}

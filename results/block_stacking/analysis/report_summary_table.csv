@@ -1,0 +1,9 @@
+comparison,condition,placements,placement_error_mean_mm,placement_error_std_mm
+Tower level,Level 1,20,8.285736668867534,1.8877215461987753
+Tower level,Level 2,20,16.465469919371632,1.726381150898271
+Tower level,Level 3,10,24.844637212791557,2.051963277983313
+Tower size at fixed level,"2-block tower, level 1",10,10.108455850800533,0.09381490296515771
+Tower size at fixed level,"2-block tower, level 2",10,17.83045693818952,0.24000827617508483
+Tower size at fixed level,"3-block tower, level 1",10,6.463017486934538,0.3622529251141344
+Tower size at fixed level,"3-block tower, level 2",10,15.100482900553745,1.4470360012737222
+Tower size at fixed level,"3-block tower, level 3",10,24.844637212791557,2.051963277983313

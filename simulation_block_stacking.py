@@ -28,6 +28,10 @@ HOME_Q = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
 GRASP_HAND_OFFSET_Z = 0.090
 TRANSIT_CLEARANCE_Z = 0.190
 PLACE_CLEARANCE_Z = 0.006
+# The task-space controller consistently places higher levels short in X.
+# Compensate the measured bias while retaining the nominal tower centres for
+# final validation: roughly 8 mm, 16 mm, and 25 mm for levels 0, 1, and 2.
+PLACE_X_COMPENSATION = np.array([0.008, 0.016, 0.025])
 MOVE_DURATION = 2.5
 GRIPPER_DURATION = 1.0
 SETTLE_DURATION = 0.5
@@ -184,6 +188,7 @@ def run_episode(
     render: bool = False,
     realtime: bool = False,
     save_step_log: bool = False,
+    output_dir: Path = OUTPUT_DIR,
 ) -> dict[str, object]:
     env = FrankaPickAndPlaceEnv(render_mode="human" if render else None)
     _, _ = env.reset(seed=seed)
@@ -307,7 +312,9 @@ def run_episode(
                     break
                 target = env.get_stack_target_position(level, tower=tower)
                 targets[block_name] = target
-                nominal_place = target + np.array(
+                compensated_target = target.copy()
+                compensated_target[0] += PLACE_X_COMPENSATION[level]
+                nominal_place = compensated_target + np.array(
                     [0.0, 0.0, GRASP_HAND_OFFSET_Z + PLACE_CLEARANCE_Z]
                 )
                 place_above = nominal_place + np.array(
@@ -448,7 +455,7 @@ def run_episode(
                 hand_position = env.get_end_effector_pose().position
                 carried_position = env.get_block_position(block_name)
                 carried_offset = carried_position - hand_position
-                place = target - carried_offset
+                place = compensated_target - carried_offset
                 place[2] += PLACE_CLEARANCE_Z
                 phase(f"{prefix}_place", place, MOVE_DURATION, 0.0)
                 phase(f"{prefix}_release", place, GRIPPER_DURATION, 1.0)
@@ -516,9 +523,9 @@ def run_episode(
     finally:
         env.close()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if save_step_log and step_logs:
-        path = OUTPUT_DIR / f"episode_{episode_index:02d}_steps.csv"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / f"episode_{episode_index:02d}_steps.csv"
         with path.open("w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=step_logs[0].keys())
             writer.writeheader()
@@ -554,9 +561,9 @@ def run_episode(
     }
 
 
-def write_results(results: list[dict[str, object]]) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    with (OUTPUT_DIR / "episodes.csv").open("w", newline="") as file:
+def write_results(results: list[dict[str, object]], output_dir: Path = OUTPUT_DIR) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "episodes.csv").open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=results[0].keys())
         writer.writeheader()
         writer.writerows(results)
@@ -575,13 +582,16 @@ def write_results(results: list[dict[str, object]]) -> None:
         "placement_error_mean_m": float(np.mean(placement)),
         "placement_error_std_m": float(np.std(placement, ddof=1)) if placement.size > 1 else None,
     }
-    (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument(
+        "--episode", type=int, help="run only this episode from the seeded sequence (1-based)"
+    )
     parser.add_argument("--seed", type=int, default=42, help="base experiment seed")
     parser.add_argument("--horizon", type=float, default=DEFAULT_HORIZON)
     parser.add_argument("--headless", action="store_true")
@@ -594,10 +604,15 @@ if __name__ == "__main__":
     args = parse_args()
     if args.episodes < 1:
         raise ValueError("--episodes must be at least 1.")
+    if args.episode is not None and not 1 <= args.episode <= args.episodes:
+        raise ValueError("--episode must be between 1 and --episodes.")
     seed_sequence = np.random.SeedSequence(args.seed)
     episode_seeds = [
         int(child.generate_state(1)[0]) for child in seed_sequence.spawn(args.episodes)
     ]
+    output_dir = OUTPUT_DIR
+    if args.episode is not None or args.episodes == 1:
+        output_dir = OUTPUT_DIR / "replays" / f"seed_{args.seed}_episode_{args.episode or 1:02d}"
     experiment_results = [
         run_episode(
             episode_index=index,
@@ -606,7 +621,10 @@ if __name__ == "__main__":
             render=not args.headless,
             realtime=not args.no_realtime,
             save_step_log=args.save_step_logs,
+            output_dir=output_dir,
         )
         for index, episode_seed in enumerate(episode_seeds, start=1)
+        if args.episode is None or index == args.episode
     ]
-    write_results(experiment_results)
+    write_results(experiment_results, output_dir)
+    print(f"Results saved to {output_dir}")

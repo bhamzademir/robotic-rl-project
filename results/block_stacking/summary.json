@@ -1,0 +1,9 @@
+{
+  "episodes": 10,
+  "successes": 10,
+  "success_rate": 1.0,
+  "completion_time_mean_s": 112.62999999991891,
+  "completion_time_std_s": 0.0,
+  "placement_error_mean_m": 0.014869456266795778,
+  "placement_error_std_m": 0.0007022989769543581
+}

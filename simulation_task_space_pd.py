@@ -6,6 +6,7 @@ Run on macOS with:
 from __future__ import annotations
 
 import csv
+import argparse
 import time
 from pathlib import Path
 
@@ -30,8 +31,8 @@ def smoothstep(t: float) -> tuple[float, float]:
     return 3.0 * t**2 - 2.0 * t**3, 6.0 * t - 6.0 * t**2
 
 
-def run_demo() -> None:
-    env = FrankaPickAndPlaceEnv(render_mode="human")
+def run_demo(render: bool = True, realtime: bool = True) -> None:
+    env = FrankaPickAndPlaceEnv(render_mode="human" if render else None)
     env.reset()
     env.data.qpos[env.arm_qpos_indices] = HOME_Q
     env.data.qvel[:] = 0.0
@@ -107,9 +108,10 @@ def run_demo() -> None:
                 }
             )
 
-            if step % DISPLAY_EVERY == 0:
+            if render and step % DISPLAY_EVERY == 0:
                 env.render()
-                time.sleep(DISPLAY_EVERY * dt)
+                if realtime:
+                    time.sleep(DISPLAY_EVERY * dt)
 
         final = logs[-1]
         print(f"Final position error: {1000.0 * final['position_error']:.3f} mm")
@@ -192,4 +194,8 @@ def save_results(logs: list[dict]) -> None:
 
 
 if __name__ == "__main__":
-    run_demo()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--headless", action="store_true", help="disable viewer")
+    parser.add_argument("--no-realtime", action="store_true", help="do not pace viewer")
+    args = parser.parse_args()
+    run_demo(render=not args.headless, realtime=not args.no_realtime)

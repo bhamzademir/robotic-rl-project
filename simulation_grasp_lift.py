@@ -17,6 +17,7 @@ exact hand-body origin depends on the Panda XML model.
 from __future__ import annotations
 
 import csv
+import argparse
 import time
 from pathlib import Path
 
@@ -71,8 +72,8 @@ def interpolate_segment(
     return position, velocity
 
 
-def run_demo() -> None:
-    env = FrankaPickAndPlaceEnv(render_mode="human")
+def run_demo(render: bool = True, realtime: bool = True) -> None:
+    env = FrankaPickAndPlaceEnv(render_mode="human" if render else None)
     env.reset()
 
     env.data.qpos[env.arm_qpos_indices] = HOME_Q
@@ -172,9 +173,10 @@ def run_demo() -> None:
             )
             elapsed_global += dt
 
-            if step % DISPLAY_EVERY == 0:
+            if render and step % DISPLAY_EVERY == 0:
                 env.render()
-                time.sleep(DISPLAY_EVERY * dt)
+                if realtime:
+                    time.sleep(DISPLAY_EVERY * dt)
 
         return last_desired
 
@@ -334,4 +336,8 @@ def save_results(logs: list[dict]) -> None:
 
 
 if __name__ == "__main__":
-    run_demo()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--headless", action="store_true", help="disable viewer")
+    parser.add_argument("--no-realtime", action="store_true", help="do not pace viewer")
+    args = parser.parse_args()
+    run_demo(render=not args.headless, realtime=not args.no_realtime)
