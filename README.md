@@ -40,7 +40,9 @@ The batch commands regenerate files under `results/`. Published run data:
 - [Controller limits](results/controller_limits/) includes position and
   orientation steps, a traversal-time sweep, and static-load and force-pulse tests.
 - [Five-block stacking](results/block_stacking/episodes.csv) includes ten seeded
-  layouts, requested orders, completion times and placement errors. A passing
+  layouts, requested orders, completion times and placement errors from the
+  evaluation before level-specific placement compensation. The current code
+  applies that compensation, so a new batch can produce different errors. A passing
   episode completes both towers within 120 s and meets the 35 mm horizontal
   and 25 mm vertical placement tolerances for every block. Add
   `--save-step-logs` to generate the full controller traces locally.
